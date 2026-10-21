@@ -1,0 +1,26 @@
+# engagement-harness — configuration
+# Copy to ~/.config/engagement-harness/harness.conf and edit per engagement.
+# Format: KEY=value. Values are not shell-evaluated.
+
+# Program-mandated research identifier. Sent on every request from bin/hit
+# and injected by bin/pw-session.js on every in-scope host.
+IDENTIFIER_NAME=X-Research-Identifier
+IDENTIFIER_VALUE=h1:researcher-handle
+
+# Fallback user-agent tag, if the program wants the identifier in the UA.
+# Leave empty unless the program asks for it.
+USER_AGENT_TAG=
+
+# Host allowlist. Space-separated globs. Anything else is REFUSED.
+# Example: example.com *.example.com api.example.net
+SCOPE_HOSTS=example.com *.example.com
+
+# Optional proxy for capture (e.g. Burp or mitmproxy).
+# PROXY=http://127.0.0.1:8080
+
+# Where cookie jars, tokens and captured traffic are written. Keep this out of
+# any repository.
+STATE_DIR=$HOME/.local/state/engagement-harness
+
+# Extra curl flags applied to every request, e.g. --max-time 20
+CURL_EXTRA=

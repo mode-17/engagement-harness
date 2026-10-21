@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+#
+# hit — scope-guarded, per-identity curl wrapper.
+#
+# Every request carries the program's mandatory identifier, is sent with the
+# session of a named identity, and is refused if its host is not in the
+# allowlist. The rules live here so they cannot be forgotten at 2am.
+#
+# Usage:
+#   bin/hit <identity> [curl arguments...]
+#
+#   bin/hit anon -D - -o /dev/null https://app.example.com/
+#   bin/hit A    https://app.example.com/api/me
+#   bin/hit B    -X POST --json '{"a":1}' https://app.example.com/api/items
+#
+# Configuration: $HARNESS_CONF, else ~/.config/engagement-harness/harness.conf
+# See harness.conf.example for the format.
+#
+set -euo pipefail
+
+CONF="${HARNESS_CONF:-$HOME/.config/engagement-harness/harness.conf}"
+[ -r "$CONF" ] || { echo "hit: cannot read config: $CONF" >&2; exit 2; }
+
+# --- config (KEY=value, no shell evaluation) -----------------------------------
+IDENTIFIER_NAME=""
+IDENTIFIER_VALUE=""
+USER_AGENT_TAG=""
+SCOPE_HOSTS=""
+PROXY=""
+STATE_DIR="$HOME/.local/state/engagement-harness"
+CURL_EXTRA=""
+
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%%#*}"
+  line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  [ -n "$line" ] || continue
+  key="${line%%=*}"; value="${line#*=}"
+  value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  case "$key" in
+    IDENTIFIER_NAME)  IDENTIFIER_NAME="$value" ;;
+    IDENTIFIER_VALUE) IDENTIFIER_VALUE="$value" ;;
+    USER_AGENT_TAG)   USER_AGENT_TAG="$value" ;;
+    SCOPE_HOSTS)      SCOPE_HOSTS="$value" ;;
+    PROXY)            PROXY="$value" ;;
+    STATE_DIR)        STATE_DIR="$value" ;;
+    CURL_EXTRA)       CURL_EXTRA="$value" ;;
+    *) ;;
+  esac
+done < "$CONF"
+
+mkdir -p "$STATE_DIR/cookies"
+
+ident="${1:-}"; shift || true
+[ -n "$ident" ] || { echo "usage: hit <identity> [curl args...]" >&2; exit 2; }
+
+# --- scope guard: every URL argument must match an allowlisted host ------------
+if [ -n "$SCOPE_HOSTS" ]; then
+  for a in "$@"; do
+    case "$a" in
+      http://*|https://*)
+        host="${a#*://}"; host="${host%%/*}"; host="${host%%\?*}"; host="${host%%:*}"
+        ok=0
+        for pat in $SCOPE_HOSTS; do
+          # shellcheck disable=SC2053  # RHS is intentionally a glob pattern
+          if [[ "$host" == $pat ]]; then ok=1; break; fi
+        done
+        if [ "$ok" -ne 1 ]; then
+          echo "REFUSED (out of scope): $host" >&2
+          exit 3
+        fi
+        ;;
+    esac
+  done
+else
+  echo "hit: warning — SCOPE_HOSTS is empty, scope guard disabled" >&2
+fi
+
+# --- identity session ---------------------------------------------------------
+jar="$STATE_DIR/cookies/$ident.jar"
+token_file="$STATE_DIR/cookies/$ident.token"
+ua_file="$STATE_DIR/cookies/$ident.useragent"
+
+hdr=()
+if [ -n "$IDENTIFIER_NAME" ] && [ -n "$IDENTIFIER_VALUE" ]; then
+  hdr+=(-H "$IDENTIFIER_NAME: $IDENTIFIER_VALUE")
+fi
+
+if [ -n "$USER_AGENT_TAG" ]; then
+  hdr+=(-A "$USER_AGENT_TAG")
+fi
+
+if [ -f "$ua_file" ]; then
+  hdr+=(-A "$(head -n1 "$ua_file" | tr -d '\r\n')")
+fi
+
+if [ -f "$token_file" ]; then
+  hdr+=(-H "Authorization: Bearer $(head -n1 "$token_file" | tr -d '\r\n')")
+fi
+
+if [ -n "$PROXY" ]; then
+  hdr+=(-x "$PROXY")
+fi
+
+# shellcheck disable=SC2086  # CURL_EXTRA is intentionally word-split
+exec curl -sS --compressed -b "$jar" -c "$jar" \
+  ${CURL_EXTRA:+$CURL_EXTRA} \
+  ${hdr[@]+"${hdr[@]}"} "$@"

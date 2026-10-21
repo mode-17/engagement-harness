@@ -1,0 +1,22 @@
+# Session state and capture output — never commit
+*.jar
+*.token
+*.useragent
+*.storage.json
+capture-*.jsonl
+profile-*/
+
+# Local config
+harness.conf
+
+# Node
+node_modules/
+package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+
+# OS noise
+.DS_Store
+Thumbs.db
